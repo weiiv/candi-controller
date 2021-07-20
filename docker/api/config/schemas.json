@@ -1,0 +1,27 @@
+[
+  {
+    "id": "3LMySHBoa3hnMmUCxBJrXQ:2:Proof of Vaccination:0.1.1"
+  },
+  {
+    "schema_name": "pan-canadian-pvc",
+    "schema_version": "0.1.1",
+    "attributes": [
+      "givenName",
+      "familyName",
+      "birthDate",
+      "security",
+      "vaccineCode",
+      "occurrenceDate",
+      "vaccineLotNumber",
+      "performerName",
+      "isSubpotent",
+      "status",
+      "manufacture",
+      "issued"
+    ],
+    "default": true,
+    "revocable": true,
+    "tag": "pan-canadian-pvc",
+    "public": true
+  }
+]

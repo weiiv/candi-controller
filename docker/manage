@@ -1,0 +1,313 @@
+#!/bin/bash
+export MSYS_NO_PATHCONV=1
+export DOCKERHOST=${APPLICATION_URL-$(docker run --rm --net=host eclipse/che-ip)}
+set -e
+
+#
+# Global utility functions - START
+#
+function echoError (){
+  _msg=${1}
+  _red='\e[31m'
+  _nc='\e[0m' # No Color
+  echo -e "${_red}${_msg}${_nc}"
+}
+
+function echoWarning (){
+  _msg=${1}
+  _yellow='\e[33m'
+  _nc='\e[0m' # No Color
+  echo -e "${_yellow}${_msg}${_nc}"
+}
+
+function isInstalled () {
+  rtnVal=$(type "$1" >/dev/null 2>&1)
+  rtnCd=$?
+  if [ ${rtnCd} -ne 0 ]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
+function isS2iInstalled () {
+  S2I_EXE=s2i
+  if ! isInstalled ${S2I_EXE}; then
+    echoError "The ${S2I_EXE} executable is needed and not on your path."
+    echoError "It can be downloaded from here: https://github.com/openshift/source-to-image/releases"
+    echoError "Make sure you extract the binary and place it in a directory on your path."
+    exit 1
+  fi
+}
+
+#
+# Global utility functions - END
+#
+SCRIPT_HOME="$(cd "$(dirname "$0")" && pwd)"
+
+# =================================================================================================================
+# Usage:
+# -----------------------------------------------------------------------------------------------------------------
+usage() {
+  cat <<-EOF
+    
+      Usage: $0 [command] [options]
+    
+      Commands:
+    
+      logs - Display the logs from the docker compose run (ctrl-c to exit).
+
+      start - Runs the containers in production mode.
+      up - Same as start.
+      
+      start-dev - Runs a live development version of the containers, with hot-reloading
+              enabled.
+
+      stop - Stops the services.  This is a non-destructive process.  The volumes and containers
+             are not deleted so they will be reused the next time you run start.
+    
+      down - Brings down the services and removes the volumes (storage) and containers.
+      rm - Same as down
+
+EOF
+  exit 1
+}
+# -----------------------------------------------------------------------------------------------------------------
+# Default Settings:
+# -----------------------------------------------------------------------------------------------------------------
+DEFAULT_CONTAINERS="db maildev"
+PROD_CONTAINERS="api"
+DEV_CONTAINERS="api-dev"
+# -----------------------------------------------------------------------------------------------------------------
+# Functions:
+# -----------------------------------------------------------------------------------------------------------------
+build-api() {
+  BASE_IMAGE="centos/nodejs-12-centos7"
+  echo "Building candi-controller-api image using $BASE_IMAGE as base..."
+  
+  ${S2I_EXE} build \
+    --copy \
+    '../api' \
+    $BASE_IMAGE \
+    'candi-controller-api'
+}
+
+build-all() {
+  build-api
+}
+
+configureEnvironment() {
+  if [ -f .env ]; then
+    while read line; do
+      if [[ ! "$line" =~ ^\# ]] && [[ "$line" =~ .*= ]]; then
+        export ${line//[$'\r\n']}
+      fi
+    done <.env
+  fi
+
+  for arg in "$@"; do
+    # Remove recognized arguments from the list after processing.
+    shift
+
+    # echo "arg: ${arg}"
+    # echo "Remaining: ${@}"
+
+    case "$arg" in
+      *=*)
+        # echo "Exporting ..."
+        export "${arg}"
+        ;;
+      *)
+        # echo "Saving for later ..."
+        # If not recognized, save it for later procesing ...
+        set -- "$@" "$arg"
+        ;;
+    esac
+  done
+
+  # Global
+  export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-candi-controller}"
+  export S2I_SCRIPTS_PATH=${S2I_SCRIPTS_PATH:-/usr/libexec/s2i}
+  export DEBUG=${DEBUG}
+  export LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+
+  # db
+  export MONGODB_ADMIN_PASSWORD=admin
+  export MONGODB_USER=mongouser
+  export MONGODB_PASSWORD=mongopwd
+  export MONGODB_DATABASE=candi_controller_db
+  export MONGODB_PORT=27017
+
+  # agent
+  export AGENT_ADMIN_PORT=8024
+  export AGENT_ADMIN_API_KEY=${AGENT_ADMIN_API_KEY:-"agent-api-key-dev"}
+
+  # api
+  export API_PORT=5000
+  export AGENT_ADMIN_URL=${AGENT_ADMIN_URL:-http://$DOCKERHOST:$AGENT_ADMIN_PORT}
+  export DB_SERVICE="db"
+  export SMTP_HOST=${SMTP_HOST:-maildev}
+  export SMTP_PORT=${SMTP_PORT:-25}
+  export ADMIN_EMAIL=${ADMIN_EMAIL:-"noreply@example.com"}
+  if [ -z "${DEV_MODE}" ]; then
+    export PUBLIC_SITE_URL=http://localhost:8082
+  else
+    export PUBLIC_SITE_URL=http://localhost:4251
+  fi
+  export EMAIL_SUBJECT=${EMAIL_SUBJECT:-"Issuer Controller Invite"}
+}
+
+getInputParams() {
+  ARGS=""
+
+  for arg in $@; do
+    case "$arg" in
+    *=*)
+      # Skip it
+      ;;
+    *)
+      ARGS+=" $arg"
+      ;;
+    esac
+  done
+
+  echo ${ARGS}
+}
+
+getStartupParams() {
+  CONTAINERS=""
+  ARGS=""
+
+  for arg in $@; do
+    case "$arg" in
+    *=*)
+      # Skip it
+      ;;
+    -*)
+      ARGS+=" $arg"
+      ;;
+    *)
+      CONTAINERS+=" $arg"
+      ;;
+    esac
+  done
+
+  if [ -z "$CONTAINERS" ]; then
+    CONTAINERS="$DEFAULT_CONTAINERS"
+  fi
+
+  echo ${ARGS} ${CONTAINERS}
+}
+
+deleteVolumes() {
+  _projectName=${COMPOSE_PROJECT_NAME:-docker}
+
+  echo "Stopping and removing any running containers ..."
+  docker-compose down -v
+
+  _pattern="^${_projectName}_\|^docker_"
+  _volumes=$(docker volume ls -q | grep ${_pattern})
+
+  if [ ! -z "${_volumes}" ]; then
+    echo "Removing project volumes ..."
+    echo ${_volumes} | xargs docker volume rm
+  else
+    echo "No project volumes exist."
+  fi
+
+  echo "Removing build cache ..."
+  rm -Rf ../client/tob-web/.cache
+}
+
+toLower() {
+  echo $(echo ${@} | tr '[:upper:]' '[:lower:]')
+}
+
+echoError (){
+  _msg=${1}
+  _red='\033[0;31m'
+  _nc='\033[0m' # No Color
+  echo -e "${_red}${_msg}${_nc}" >&2
+}
+
+functionExists() {
+  (
+    if [ ! -z ${1} ] && type ${1} &>/dev/null; then
+      return 0
+    else
+      return 1
+    fi
+  )
+}
+# =================================================================================================================
+
+pushd "${SCRIPT_HOME}" >/dev/null
+COMMAND=$(toLower ${1})
+shift || COMMAND=usage
+
+_startupParams=$(getStartupParams --force-recreate $@)
+
+case "${COMMAND}" in
+  logs)
+    configureEnvironment "$@"
+    docker-compose logs -f
+    ;;
+  build)
+    isS2iInstalled
+
+    configureEnvironment "$@"
+
+    buildImage=$(toLower ${1})
+    shift || buildImage=all
+    buildImage=$(echo ${buildImage} | sed s~^candi-controller-~~)
+    case "$buildImage" in
+      *=*)
+        buildImage=all
+        ;;
+    esac
+
+    if functionExists "build-${buildImage}"; then
+      eval "build-${buildImage}"
+    else
+      echoError "\nThe build function, build-${buildImage}, does not exist.  Please check your build parameters and try again.\nUse '-h' to get full help details."
+      exit 1
+    fi
+    ;;
+  start|start|up)
+    unset DEV_MODE
+    
+    configureEnvironment "$@"
+    customizeKeycloakConfig
+    docker-compose up -d ${_startupParams} ${DEFAULT_CONTAINERS} ${PROD_CONTAINERS}
+    docker-compose logs -f
+    ;;
+  start-dev)
+    export DEV_MODE=true
+    export AGENT_ADMIN_URL=https://issuer-admin.ngrok.io
+
+    if [[ ! -f ".env" ]]; then
+      echo "DEV_MODE=${DEV_MODE}" > .env
+    fi
+
+    configureEnvironment "$@"
+    docker-compose --env-file .env up -d ${_startupParams} ${DEFAULT_CONTAINERS} ${DEV_CONTAINERS}
+    docker-compose logs -f
+    ;;
+  stop)
+    configureEnvironment
+    docker-compose stop 
+    ;;
+  rm|down)
+    if [ -f ".env" ] ; then
+        rm ".env"
+    fi
+
+    configureEnvironment
+    deleteVolumes
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+popd >/dev/null
