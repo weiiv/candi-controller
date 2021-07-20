@@ -1,10 +1,16 @@
 import { HookContext } from "@feathersjs/feathers";
-import { validateCredentialRequest } from "../../utils/hooks";
+import { handleRevocation } from "../../utils/hooks";
 
 export default {
   before: {
     all: [],
     create: [],
+    update: [
+      handleRevocation
+    ],
+    patch: [
+      handleRevocation
+    ],
   },
 
   after: {

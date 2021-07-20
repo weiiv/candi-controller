@@ -1,9 +1,12 @@
 import { Forbidden, MethodNotAllowed } from "@feathersjs/errors";
 import { HookContext } from "@feathersjs/feathers";
+import moment from "moment";
 import { decode, verify } from "jsonwebtoken";
 import jwks, { ClientOptions, JwksClient, SigningKey } from "jwks-rsa";
 import { Db, ObjectId } from "mongodb";
+import { revokeCredential } from "./credential-exchange";
 import logger from "../logger";
+
 
 export async function validateEmail(context: HookContext) {
   const emailRegexp = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
@@ -117,6 +120,32 @@ export async function validateCredentialRequest(context: HookContext) {
     throw new Forbidden(
       "The requested action could not be completed. Please check your settings and ensure you are either authenticated or requesting a public schema."
     );
+  }
+  return context;
+}
+
+export async function handleRevocation(context: HookContext) {
+  if (
+    context.data.revoked &&
+    context.data.revocation_id &&
+    context.data.revoc_reg_id
+  ) {
+    await revokeCredential(context);
+    const revocation_history = (context.data.revocation_history as any[]) || [];
+    revocation_history.push({
+      revocation_id: context.data.revocation_id,
+      revoc_reg_id: context.data.revoc_reg_id,
+      reissue_date: moment().toISOString(true),
+    });
+    context.data.revoc_reg_id = undefined;
+    context.data.revocation_id = undefined;
+    context.data.revocation_history = revocation_history;
+  } else if (
+    !context.data.revoked &&
+    context.data.revocation_id &&
+    context.data.revoc_reg_id
+  ) {
+    context.data.issued = false;
   }
   return context;
 }
