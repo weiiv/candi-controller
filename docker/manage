@@ -275,9 +275,10 @@ case "${COMMAND}" in
     ;;
   start|start|up)
     unset DEV_MODE
+    export AGENT_ADMIN_URL=https://ws.dev.issuer-admin.candi.gov.on.ca
+    export AGENT_ADMIN_API_KEY="b5ucLyX66M78qDrp"
     
     configureEnvironment "$@"
-    customizeKeycloakConfig
     docker-compose up -d ${_startupParams} ${DEFAULT_CONTAINERS} ${PROD_CONTAINERS}
     docker-compose logs -f
     ;;
