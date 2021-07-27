@@ -18,7 +18,6 @@
     ],
     "default": true,
     "revocable": true,
-    "tag": "pan-canadian-pvc",
     "public": true
   }
 ]

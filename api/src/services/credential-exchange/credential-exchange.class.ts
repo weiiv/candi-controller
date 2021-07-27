@@ -13,6 +13,7 @@ import {
 import { ServiceAction, ServiceType } from "../../models/enums";
 import { formatCredentialOffer } from "../../utils/credential-exchange";
 import { updateInviteRecord } from "../../utils/issuer-invite";
+import { CredDefUtils } from "../../utils/credential-definition";
 import { AriesSchema } from "../../models/schema";
 import logger from "../../logger";
 
@@ -23,7 +24,7 @@ interface Data {
   claims: Claim[];
 }
 
-interface ServiceOptions {}
+interface ServiceOptions { }
 
 export class CredentialExchange implements ServiceSwaggerAddon {
   app: Application;
@@ -46,11 +47,11 @@ export class CredentialExchange implements ServiceSwaggerAddon {
     const comment = this.app.get("issuer").offerComment;
     const attributes = data.claims.map(
       (claim: any) =>
-        ({
-          name: claim.name,
-          value: claim.value,
-          "mime-type": "text/plain",
-        } as AriesCredentialAttribute)
+      ({
+        name: claim.name,
+        value: claim.value,
+        "mime-type": "text/plain",
+      } as AriesCredentialAttribute)
     );
 
     let schema_id = data.schema_id;
@@ -65,7 +66,15 @@ export class CredentialExchange implements ServiceSwaggerAddon {
       }
       schema_id = default_schema.schema_id || default_schema.schema.id;
     }
-    const cred_def_id = this.app.get("credDefs").get(schema_id) as string;
+    let cred_def_id = this.app.get("credDefs").get(schema_id) as string;
+
+    if (!cred_def_id) {
+      const credDefUtils = CredDefUtils.getInstance(this.app);
+      const formattedCredDef = credDefUtils.formatCredentialDefinition(schema_id, true);
+      const credDef = await credDefUtils.getOrCreateCredDef(formattedCredDef);
+      this.app.get("credDefs").set(schema_id, credDef.credential_definition_id);
+      cred_def_id = credDef.credential_definition_id;
+    }
 
     const credentialOffer = formatCredentialOffer(
       data.connection_id,
