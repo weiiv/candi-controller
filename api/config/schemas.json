@@ -1,7 +1,7 @@
 [
   {
     "schema_name": "pan-canadian-pvc",
-    "schema_version": "0.1.2",
+    "schema_version": "0.1.4",
     "attributes": [
       "givenName",
       "familyName",
@@ -13,11 +13,12 @@
       "performerName",
       "isSubpotent",
       "status",
-      "manufacture",
+      "manufacturer",
       "issued"
     ],
     "default": true,
     "revocable": true,
+    "tag": "pan-canadian-pvc",
     "public": true
   }
 ]
